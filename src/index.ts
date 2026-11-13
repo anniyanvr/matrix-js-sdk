@@ -14,22 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import request from "request";
+import * as matrixcs from "./matrix.ts";
 
-import * as matrixcs from "./matrix";
-import * as utils from "./utils";
-import { logger } from './logger';
-
-matrixcs.request(request);
-
-try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const crypto = require('crypto');
-    utils.setCrypto(crypto);
-} catch (err) {
-    logger.log('nodejs was compiled without crypto support');
+if (globalThis.__js_sdk_entrypoint) {
+    throw new Error("Multiple matrix-js-sdk entrypoints detected!");
 }
+globalThis.__js_sdk_entrypoint = true;
 
-export * from "./matrix";
+export * from "./matrix.ts";
 export default matrixcs;
-

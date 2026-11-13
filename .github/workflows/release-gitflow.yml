@@ -1,0 +1,99 @@
+# Gitflow merge-back master->develop
+name: Merge master -> develop
+on:
+    push:
+        branches: [master]
+    workflow_call:
+        secrets:
+            ELEMENT_BOT_TOKEN:
+                required: true
+        inputs:
+            dependencies:
+                description: List of dependencies to reset.
+                type: string
+                required: false
+            dir:
+                description: The directory to release
+                type: string
+                default: "."
+concurrency: ${{ github.workflow }}
+permissions: {} # Uses ELEMENT_BOT_TOKEN
+jobs:
+    merge:
+        runs-on: ubuntu-26.04
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+              with:
+                  # We will be pushing to this branch and want the CI to run after we do so we cannot use the GITHUB_TOKEN
+                  token: ${{ secrets.ELEMENT_BOT_TOKEN }}
+                  fetch-depth: 0
+                  # We check this repo out and the actions repo out side by side rather than nested to
+                  # avoid accidentally including the latter in the former
+                  path: release-repo
+                  persist-credentials: true
+
+            - name: Get actions scripts
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+              with:
+                  repository: matrix-org/matrix-js-sdk
+                  persist-credentials: false
+                  # Must be within the workspace directory, as nice as it would be to have it in tmp
+                  path: .action-repo
+                  sparse-checkout: |
+                      scripts/release
+
+            - name: 🔨 Setup pnpm & node
+              uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
+              with:
+                  runtime: node
+                  cache: true
+                  install: false
+                  cache-dependency-path: release-repo/pnpm-lock.yaml
+                  package-json-file: release-repo/package.json
+
+            - name: Install Deps
+              working-directory: release-repo
+              run: "pnpm install --frozen-lockfile --ignore-scripts"
+
+            - name: Set up git
+              run: |
+                  git config --global user.email "releases@riot.im"
+                  git config --global user.name "RiotRobot"
+
+            - name: Merge to develop
+              working-directory: release-repo
+              run: ../.action-repo/scripts/release/merge-master-develop.sh
+
+            - name: Reset dependencies
+              if: inputs.dependencies
+              working-directory: release-repo/${{ inputs.dir }}
+              run: |
+                  while IFS= read -r PACKAGE; do
+                      [ -z "$PACKAGE" ] && continue
+
+                      CURRENT_VERSION=$(cat package.json | jq -r .dependencies[\"$PACKAGE\"])
+                      echo "Current $PACKAGE version is $CURRENT_VERSION"
+
+                      if [[ "$CURRENT_VERSION" == "null" ]]
+                      then
+                          echo "Unable to find $PACKAGE in package.json"
+                          exit 1
+                      fi
+
+                      if [[ "$CURRENT_VERSION" == *"#develop" ]]
+                      then
+                          echo "Not updating dependency $PACKAGE"
+                          continue
+                      fi
+
+                      echo "Resetting $PACKAGE to develop branch..."
+                      pnpm add "github:matrix-org/$PACKAGE#develop"
+                      git add -u
+                      git commit -m "Reset $PACKAGE back to develop branch"
+                  done <<< "$DEPENDENCIES"
+              env:
+                  DEPENDENCIES: ${{ inputs.dependencies }}
+
+            - name: Push changes
+              working-directory: release-repo
+              run: git push origin develop

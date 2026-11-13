@@ -1,5 +1,5 @@
 /*
-Copyright 2021 The Matrix.org Foundation C.I.C.
+Copyright 2021 - 2022 The Matrix.org Foundation C.I.C.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,7 +21,13 @@ limitations under the License.
 export class NamespacedValue<S extends string, U extends string> {
     // Stable is optional, but one of the two parameters is required, hence the weird-looking types.
     // Goal is to to have developers explicitly say there is no stable value (if applicable).
-    public constructor(public readonly stable: S | null | undefined, public readonly unstable?: U) {
+    public constructor(stable: S, unstable: U);
+    public constructor(stable: S, unstable: U | null);
+    public constructor(stable: null, unstable: U);
+    public constructor(
+        public readonly stable: S | null,
+        public readonly unstable: U | null,
+    ) {
         if (!this.unstable && !this.stable) {
             throw new Error("One of stable or unstable values must be supplied");
         }
@@ -31,14 +37,21 @@ export class NamespacedValue<S extends string, U extends string> {
         if (this.stable) {
             return this.stable;
         }
-        return this.unstable;
+        return this.unstable!;
     }
 
-    public get altName(): U | S | null {
+    public get altName(): U | S | null | undefined {
         if (!this.stable) {
             return null;
         }
         return this.unstable;
+    }
+
+    public get names(): (U | S)[] {
+        const names = [this.name];
+        const altName = this.altName;
+        if (altName) names.push(altName);
+        return names;
     }
 
     public matches(val: string): boolean {
@@ -47,8 +60,8 @@ export class NamespacedValue<S extends string, U extends string> {
 
     // this desperately wants https://github.com/microsoft/TypeScript/pull/26349 at the top level of the class
     // so we can instantiate `NamespacedValue<string, _, _>` as a default type for that namespace.
-    public findIn<T>(obj: any): T {
-        let val: T;
+    public findIn<V>(obj: Partial<Record<NonNullable<S | U>, V>>): V | undefined {
+        let val: V | undefined = undefined;
         if (this.name) {
             val = obj?.[this.name];
         }
@@ -70,6 +83,21 @@ export class NamespacedValue<S extends string, U extends string> {
     }
 }
 
+export class ServerControlledNamespacedValue<S extends string, U extends string> extends NamespacedValue<S, U> {
+    private preferUnstable = false;
+
+    public setPreferUnstable(preferUnstable: boolean): void {
+        this.preferUnstable = preferUnstable;
+    }
+
+    public get name(): U | S {
+        if (this.stable && !this.preferUnstable) {
+            return this.stable;
+        }
+        return this.unstable!;
+    }
+}
+
 /**
  * Represents a namespaced value which prioritizes the unstable value over the stable
  * value.
@@ -84,10 +112,10 @@ export class UnstableValue<S extends string, U extends string> extends Namespace
     }
 
     public get name(): U {
-        return this.unstable;
+        return this.unstable!;
     }
 
     public get altName(): S {
-        return this.stable;
+        return this.stable!;
     }
 }

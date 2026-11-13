@@ -14,26 +14,26 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import { Relations, RelationsEvent, EventHandlerMap } from "./relations";
-import { MatrixEvent } from "./event";
-import { Listener } from "./typed-event-emitter";
+import { type Relations, type RelationsEvent, type EventHandlerMap } from "./relations.ts";
+import { type MatrixEvent } from "./event.ts";
+import { type Listener } from "./typed-event-emitter.ts";
 
 export class RelatedRelations {
     private relations: Relations[];
 
     public constructor(relations: Relations[]) {
-        this.relations = relations.filter(r => !!r);
+        this.relations = relations.filter((r) => !!r);
     }
 
     public getRelations(): MatrixEvent[] {
-        return this.relations.reduce((c, p) => [...c, ...p.getRelations()], []);
+        return this.relations.reduce<MatrixEvent[]>((c, p) => [...c, ...p.getRelations()], []);
     }
 
-    public on<T extends RelationsEvent>(ev: T, fn: Listener<RelationsEvent, EventHandlerMap, T>) {
-        this.relations.forEach(r => r.on(ev, fn));
+    public on<T extends RelationsEvent>(ev: T, fn: Listener<RelationsEvent, EventHandlerMap, T>): void {
+        this.relations.forEach((r) => r.on(ev, fn));
     }
 
-    public off<T extends RelationsEvent>(ev: T, fn: Listener<RelationsEvent, EventHandlerMap, T>) {
-        this.relations.forEach(r => r.off(ev, fn));
+    public off<T extends RelationsEvent>(ev: T, fn: Listener<RelationsEvent, EventHandlerMap, T>): void {
+        this.relations.forEach((r) => r.off(ev, fn));
     }
 }

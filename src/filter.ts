@@ -14,37 +14,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-/**
- * @module filter
- */
+import { type EventType, type RelationType } from "./@types/event.ts";
+import { UNREAD_THREAD_NOTIFICATIONS } from "./@types/sync.ts";
+import { FilterComponent, type IFilterComponent } from "./filter-component.ts";
+import { type MatrixEvent } from "./models/event.ts";
+import { NamespacedValue } from "./NamespacedValue.ts";
 
-import {
-    EventType,
-    RelationType,
-} from "./@types/event";
-import { FilterComponent, IFilterComponent } from "./filter-component";
-import { MatrixEvent } from "./models/event";
-import { UnstableValue } from "./NamespacedValue";
-
-export const UNSTABLE_FILTER_RELATION_SENDERS = new UnstableValue(
-    "relation_senders",
-    "io.element.relation_senders",
-);
-
-export const UNSTABLE_FILTER_RELATION_TYPES = new UnstableValue(
-    "relation_types",
-    "io.element.relation_types",
-);
+const profileFieldsFilterName = new NamespacedValue("profile_fields", "org.matrix.msc4429.profile_fields");
 
 /**
- * @param {Object} obj
- * @param {string} keyNesting
- * @param {*} val
  */
-function setProp(obj: object, keyNesting: string, val: any) {
-    const nestedKeys = keyNesting.split(".");
+function setProp(obj: Record<string, any>, keyNesting: string, val: any): void {
+    const nestedKeys = keyNesting.split(".") as [keyof typeof obj];
     let currentObj = obj;
-    for (let i = 0; i < (nestedKeys.length - 1); i++) {
+    for (let i = 0; i < nestedKeys.length - 1; i++) {
         if (!currentObj[nestedKeys[i]]) {
             currentObj[nestedKeys[i]] = {};
         }
@@ -53,21 +36,28 @@ function setProp(obj: object, keyNesting: string, val: any) {
     currentObj[nestedKeys[nestedKeys.length - 1]] = val;
 }
 
-/* eslint-disable camelcase */
 export interface IFilterDefinition {
-    event_fields?: string[];
-    event_format?: "client" | "federation";
-    presence?: IFilterComponent;
-    account_data?: IFilterComponent;
-    room?: IRoomFilter;
+    "event_fields"?: string[];
+    "event_format"?: "client" | "federation";
+    "presence"?: IFilterComponent;
+    "account_data"?: IFilterComponent;
+    "room"?: IRoomFilter;
+    "profile_fields"?: ProfileFieldsFilter;
+    "org.matrix.msc4429.profile_fields"?: ProfileFieldsFilter;
 }
 
 export interface IRoomEventFilter extends IFilterComponent {
-    lazy_load_members?: boolean;
-    include_redundant_members?: boolean;
-    types?: Array<EventType | string>;
-    [UNSTABLE_FILTER_RELATION_TYPES.name]?: Array<RelationType | string>;
-    [UNSTABLE_FILTER_RELATION_SENDERS.name]?: string[];
+    "lazy_load_members"?: boolean;
+    "include_redundant_members"?: boolean;
+    "types"?: Array<EventType | string>;
+    "related_by_senders"?: Array<RelationType | string>;
+    "related_by_rel_types"?: string[];
+    "unread_thread_notifications"?: boolean;
+    "org.matrix.msc3773.unread_thread_notifications"?: boolean;
+
+    // Unstable values
+    "io.element.relation_senders"?: Array<RelationType | string>;
+    "io.element.relation_types"?: string[];
 }
 
 interface IStateFilter extends IRoomEventFilter {}
@@ -81,62 +71,63 @@ interface IRoomFilter {
     timeline?: IRoomEventFilter;
     account_data?: IRoomEventFilter;
 }
-/* eslint-enable camelcase */
 
 /**
- * Construct a new Filter.
- * @constructor
- * @param {string} userId The user ID for this filter.
- * @param {string=} filterId The filter ID if known.
- * @prop {string} userId The user ID of the filter
- * @prop {?string} filterId The filter ID
+ * Filter section used for requesting a set of extended profile fields that will be sent down the sync stream.
  */
+interface ProfileFieldsFilter {
+    ids: string[];
+}
+
 export class Filter {
-    static LAZY_LOADING_MESSAGES_FILTER = {
+    public static LAZY_LOADING_MESSAGES_FILTER = {
         lazy_load_members: true,
     };
 
     /**
      * Create a filter from existing data.
-     * @static
-     * @param {string} userId
-     * @param {string} filterId
-     * @param {Object} jsonObj
-     * @return {Filter}
      */
-    public static fromJson(userId: string, filterId: string, jsonObj: IFilterDefinition): Filter {
+    public static fromJson(userId: string | undefined | null, filterId: string, jsonObj: IFilterDefinition): Filter {
         const filter = new Filter(userId, filterId);
         filter.setDefinition(jsonObj);
         return filter;
     }
 
     private definition: IFilterDefinition = {};
-    private roomFilter: FilterComponent;
-    private roomTimelineFilter: FilterComponent;
+    private roomFilter?: FilterComponent;
+    private roomTimelineFilter?: FilterComponent;
 
-    constructor(public readonly userId: string, public filterId?: string) {}
+    /**
+     * Construct a new Filter.
+     * @param userId - The user ID for this filter.
+     * @param filterId - The filter ID if known.
+     */
+    public constructor(
+        public readonly userId: string | undefined | null,
+        public filterId?: string,
+    ) {}
 
     /**
      * Get the ID of this filter on your homeserver (if known)
-     * @return {?string} The filter ID
+     * @returns The filter ID
      */
-    getFilterId(): string | null {
+    public getFilterId(): string | undefined {
         return this.filterId;
     }
 
     /**
      * Get the JSON body of the filter.
-     * @return {Object} The filter definition
+     * @returns The filter definition
      */
-    getDefinition(): IFilterDefinition {
+    public getDefinition(): IFilterDefinition {
         return this.definition;
     }
 
     /**
      * Set the JSON body of the filter
-     * @param {Object} definition The filter definition
+     * @param definition - The filter definition
      */
-    setDefinition(definition: IFilterDefinition) {
+    public setDefinition(definition: IFilterDefinition): void {
         this.definition = definition;
 
         // This is all ported from synapse's FilterCollection()
@@ -203,40 +194,75 @@ export class Filter {
 
     /**
      * Get the room.timeline filter component of the filter
-     * @return {FilterComponent} room timeline filter component
+     * @returns room timeline filter component
      */
-    getRoomTimelineFilterComponent(): FilterComponent {
+    public getRoomTimelineFilterComponent(): FilterComponent | undefined {
         return this.roomTimelineFilter;
     }
 
     /**
      * Filter the list of events based on whether they are allowed in a timeline
      * based on this filter
-     * @param {MatrixEvent[]} events  the list of events being filtered
-     * @return {MatrixEvent[]} the list of events which match the filter
+     * @param events -  the list of events being filtered
+     * @returns the list of events which match the filter
      */
-    filterRoomTimeline(events: MatrixEvent[]): MatrixEvent[] {
-        return this.roomTimelineFilter.filter(this.roomFilter.filter(events));
+    public filterRoomTimeline(events: MatrixEvent[]): MatrixEvent[] {
+        if (this.roomFilter) {
+            events = this.roomFilter.filter(events);
+        }
+        if (this.roomTimelineFilter) {
+            events = this.roomTimelineFilter.filter(events);
+        }
+        return events;
     }
 
     /**
      * Set the max number of events to return for each room's timeline.
-     * @param {Number} limit The max number of events to return for each room.
+     * @param limit - The max number of events to return for each room.
      */
-    setTimelineLimit(limit: number) {
+    public setTimelineLimit(limit: number): void {
         setProp(this.definition, "room.timeline.limit", limit);
     }
 
-    setLazyLoadMembers(enabled: boolean) {
-        setProp(this.definition, "room.state.lazy_load_members", !!enabled);
+    /**
+     * Enable threads unread notification
+     */
+    public setUnreadThreadNotifications(enabled: boolean): void {
+        this.definition = {
+            ...this.definition,
+            room: {
+                ...this.definition?.room,
+                timeline: {
+                    ...this.definition?.room?.timeline,
+                    [UNREAD_THREAD_NOTIFICATIONS.name]: enabled,
+                },
+            },
+        };
+    }
+
+    public setLazyLoadMembers(enabled: boolean): void {
+        setProp(this.definition, "room.state.lazy_load_members", enabled);
     }
 
     /**
      * Control whether left rooms should be included in responses.
-     * @param {boolean} includeLeave True to make rooms the user has left appear
+     * @param includeLeave - True to make rooms the user has left appear
      * in responses.
      */
-    setIncludeLeaveRooms(includeLeave: boolean) {
+    public setIncludeLeaveRooms(includeLeave: boolean): void {
         setProp(this.definition, "room.include_leave", includeLeave);
+    }
+
+    /**
+     * Set the list of fields to be included in the profile information sent down the sync stream.
+     * @param ids The field IDs to sync.
+     * @param stable Whether to use the stable or unstable versions of this filter.
+     * @experimental
+     */
+    public setUnstableMSC4429SyncUserProfiles(ids: string[], stable: boolean): void {
+        const field = stable
+            ? profileFieldsFilterName.name
+            : (profileFieldsFilterName.unstable ?? profileFieldsFilterName.name);
+        this.definition[field] = { ids };
     }
 }

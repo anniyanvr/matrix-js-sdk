@@ -16,11 +16,10 @@ limitations under the License.
 
 // Types relating to the /search API
 
-import { IRoomEvent, IStateEvent } from "../sync-accumulator";
-import { IRoomEventFilter } from "../filter";
-import { SearchResult } from "../models/search-result";
+import { type IRoomEvent, type IStateEvent } from "../sync-accumulator.ts";
+import { type IRoomEventFilter } from "../filter.ts";
+import { type SearchResult } from "../models/search-result.ts";
 
-/* eslint-disable camelcase */
 export interface IEventWithRoomId extends IRoomEvent {
     room_id: string;
 }
@@ -54,9 +53,9 @@ enum GroupKey {
 }
 
 export interface IResultRoomEvents {
-    count: number;
-    highlights: string[];
-    results: ISearchResult[];
+    count?: number;
+    highlights?: string[];
+    results?: ISearchResult[];
     state?: { [roomId: string]: IStateEventWithRoomId[] };
     groups?: {
         [groupKey in GroupKey]: {
@@ -114,5 +113,5 @@ export interface ISearchResults {
     count?: number;
     next_batch?: string;
     pendingRequest?: Promise<ISearchResults>;
+    abortSignal?: AbortSignal;
 }
-/* eslint-enable camelcase */

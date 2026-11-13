@@ -1,0 +1,70 @@
+name: Publish to npm
+on:
+    workflow_call:
+        inputs:
+            dir:
+                description: The directory to release
+                type: string
+                default: "."
+        outputs:
+            id:
+                description: "The npm package@version string we published"
+                value: ${{ jobs.npm.outputs.id }}
+permissions: {}
+jobs:
+    npm:
+        name: Publish to npm
+        runs-on: ubuntu-26.04
+        permissions:
+            contents: read
+            id-token: write
+        outputs:
+            id: ${{ steps.npm-publish.outputs.id }}
+        steps:
+            - name: 🧮 Checkout code
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+              with:
+                  ref: staging
+                  persist-credentials: false
+
+            - name: 🔨 Setup pnpm & node
+              uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
+              with:
+                  runtime: node
+                  cache: true
+                  install: true
+
+            - name: 🚀 Publish to npm
+              id: npm-publish
+              working-directory: ${{ inputs.dir }}
+              run: |
+                  version=$(jq -r '.version' package.json)
+                  if [[ "$version" == *-rc.* ]]; then
+                      tag=next
+                  else
+                      tag=latest
+                  fi
+
+                  pnpm publish --provenance --access public --publish-branch staging --tag "$tag"
+
+                  name=$(jq -r '.name' package.json)
+                  release="$name@$version"
+
+                  # NPM now scans published packages before they are made available for download
+                  # block here until the package is ready to be consumed.
+                  echo "Waiting for $release to become available for download..."
+                  tmpdir=$(mktemp -d)
+                  for i in $(seq 1 60); do
+                      if (cd "$tmpdir" && npm pack "$release" >/dev/null 2>&1); then
+                          echo "$release is available"
+                          break
+                      fi
+                      if [[ "$i" -eq 60 ]]; then
+                          echo "::error::Timed out waiting for $release to become available on npm"
+                          exit 1
+                      fi
+                      sleep 10
+                  done
+                  rm -rf "$tmpdir"
+
+                  echo "id=$release" >> $GITHUB_OUTPUT

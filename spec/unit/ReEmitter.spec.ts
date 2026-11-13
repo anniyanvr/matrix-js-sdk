@@ -14,8 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// eslint-disable-next-line no-restricted-imports
-import { EventEmitter } from "events";
+import { EventEmitter } from "node:events";
 
 import { ReEmitter } from "../../src/ReEmitter";
 
@@ -27,20 +26,18 @@ class EventSource extends EventEmitter {
     }
 
     doAnError() {
-        this.emit('error');
+        this.emit("error");
     }
 }
 
-class EventTarget extends EventEmitter {
+class EventTarget extends EventEmitter {}
 
-}
-
-describe("ReEmitter", function() {
-    it("Re-Emits events with the same args", function() {
+describe("ReEmitter", function () {
+    it("Re-Emits events with the same args", function () {
         const src = new EventSource();
         const tgt = new EventTarget();
 
-        const handler = jest.fn();
+        const handler = vi.fn();
         tgt.on(EVENTNAME, handler);
 
         const reEmitter = new ReEmitter(tgt);
@@ -53,18 +50,18 @@ describe("ReEmitter", function() {
         expect(handler).toHaveBeenCalledWith("foo", "bar", src);
     });
 
-    it("Doesn't throw if no handler for 'error' event", function() {
+    it("Doesn't throw if no handler for 'error' event", function () {
         const src = new EventSource();
         const tgt = new EventTarget();
 
         const reEmitter = new ReEmitter(tgt);
-        reEmitter.reEmit(src, ['error']);
+        reEmitter.reEmit(src, ["error"]);
 
         // without the workaround in ReEmitter, this would throw
         src.doAnError();
 
-        const handler = jest.fn();
-        tgt.on('error', handler);
+        const handler = vi.fn();
+        tgt.on("error", handler);
 
         src.doAnError();
 

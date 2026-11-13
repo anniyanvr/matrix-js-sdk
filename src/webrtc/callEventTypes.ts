@@ -1,10 +1,10 @@
-// allow non-camelcase as these are events type that go onto the wire
-/* eslint-disable camelcase */
+import { type CallErrorCode } from "./call.ts";
+import { NamespacedValue } from "../NamespacedValue.ts";
 
-import { CallErrorCode } from "./call";
-
-// TODO: Change to "sdp_stream_metadata" when MSC3077 is merged
-export const SDPStreamMetadataKey = "org.matrix.msc3077.sdp_stream_metadata";
+export const SDPStreamMetadataKey = new NamespacedValue(
+    "sdp_stream_metadata",
+    "org.matrix.msc3077.sdp_stream_metadata",
+);
 
 export enum SDPStreamMetadataPurpose {
     Usermedia = "m.usermedia",
@@ -22,8 +22,8 @@ export interface SDPStreamMetadata {
 }
 
 export interface CallCapabilities {
-    'm.call.transferee': boolean;
-    'm.call.dtmf': boolean;
+    "m.call.transferee": boolean;
+    "m.call.dtmf": boolean;
 }
 
 export interface CallReplacesTarget {
@@ -34,14 +34,20 @@ export interface CallReplacesTarget {
 
 export interface MCallBase {
     call_id: string;
+    conf_id?: string;
     version: string | number;
     party_id?: string;
+    sender_session_id?: string;
+    dest_session_id?: string;
 }
 
+type Description = Pick<RTCSessionDescription, "type" | "sdp">;
+
 export interface MCallAnswer extends MCallBase {
-    answer: RTCSessionDescription;
-    capabilities?: CallCapabilities;
-    [SDPStreamMetadataKey]: SDPStreamMetadata;
+    "answer": Description;
+    "capabilities"?: CallCapabilities;
+    "sdp_stream_metadata"?: SDPStreamMetadata;
+    "org.matrix.msc3077.sdp_stream_metadata"?: SDPStreamMetadata;
 }
 
 export interface MCallSelectAnswer extends MCallBase {
@@ -49,15 +55,20 @@ export interface MCallSelectAnswer extends MCallBase {
 }
 
 export interface MCallInviteNegotiate extends MCallBase {
-    offer: RTCSessionDescription;
-    description: RTCSessionDescription;
-    lifetime: number;
-    capabilities?: CallCapabilities;
-    [SDPStreamMetadataKey]: SDPStreamMetadata;
+    "offer": Description;
+    "description": Description;
+    "lifetime": number;
+    "capabilities"?: CallCapabilities;
+    "invitee"?: string;
+    "sender_session_id"?: string;
+    "dest_session_id"?: string;
+    "sdp_stream_metadata"?: SDPStreamMetadata;
+    "org.matrix.msc3077.sdp_stream_metadata"?: SDPStreamMetadata;
 }
 
 export interface MCallSDPStreamMetadataChanged extends MCallBase {
-    [SDPStreamMetadataKey]: SDPStreamMetadata;
+    "sdp_stream_metadata"?: SDPStreamMetadata;
+    "org.matrix.msc3077.sdp_stream_metadata"?: SDPStreamMetadata;
 }
 
 export interface MCallReplacesEvent extends MCallBase {
@@ -77,11 +88,9 @@ export interface MCAllAssertedIdentity extends MCallBase {
 }
 
 export interface MCallCandidates extends MCallBase {
-    candidates: RTCIceCandidate[];
+    candidates: Omit<RTCIceCandidateInit, "usernameFragment">[];
 }
 
 export interface MCallHangupReject extends MCallBase {
     reason?: CallErrorCode;
 }
-
-/* eslint-enable camelcase */

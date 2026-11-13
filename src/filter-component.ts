@@ -14,43 +14,42 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import { RelationType } from "./@types/event";
-import { UNSTABLE_FILTER_RELATION_SENDERS, UNSTABLE_FILTER_RELATION_TYPES } from "./filter";
-import { MatrixEvent } from "./models/event";
-
-/**
- * @module filter-component
- */
+import { type RelationType } from "./@types/event.ts";
+import { type MatrixEvent } from "./models/event.ts";
+import { FILTER_RELATED_BY_REL_TYPES, FILTER_RELATED_BY_SENDERS, THREAD_RELATION_TYPE } from "./models/thread.ts";
 
 /**
  * Checks if a value matches a given field value, which may be a * terminated
  * wildcard pattern.
- * @param {String} actualValue  The value to be compared
- * @param {String} filterValue  The filter pattern to be compared
- * @return {boolean} true if the actualValue matches the filterValue
+ * @param actualValue -  The value to be compared
+ * @param filterValue -  The filter pattern to be compared
+ * @returns true if the actualValue matches the filterValue
  */
 function matchesWildcard(actualValue: string, filterValue: string): boolean {
     if (filterValue.endsWith("*")) {
         const typePrefix = filterValue.slice(0, -1);
-        return actualValue.substr(0, typePrefix.length) === typePrefix;
+        return actualValue.slice(0, typePrefix.length) === typePrefix;
     } else {
         return actualValue === filterValue;
     }
 }
 
-/* eslint-disable camelcase */
 export interface IFilterComponent {
-    types?: string[];
-    not_types?: string[];
-    rooms?: string[];
-    not_rooms?: string[];
-    senders?: string[];
-    not_senders?: string[];
-    contains_url?: boolean;
-    limit?: number;
-    [UNSTABLE_FILTER_RELATION_TYPES.name]?: Array<RelationType | string>;
+    "types"?: string[];
+    "not_types"?: string[];
+    "rooms"?: string[];
+    "not_rooms"?: string[];
+    "senders"?: string[];
+    "not_senders"?: string[];
+    "contains_url"?: boolean;
+    "limit"?: number;
+    "related_by_senders"?: Array<RelationType | string>;
+    "related_by_rel_types"?: string[];
+
+    // Unstable values
+    "io.element.relation_senders"?: Array<RelationType | string>;
+    "io.element.relation_types"?: string[];
 }
-/* eslint-enable camelcase */
 
 /**
  * FilterComponent is a section of a Filter definition which defines the
@@ -59,17 +58,17 @@ export interface IFilterComponent {
  *
  * N.B. that synapse refers to these as 'Filters', and what js-sdk refers to as
  * 'Filters' are referred to as 'FilterCollections'.
- *
- * @constructor
- * @param {Object} filterJson the definition of this filter JSON, e.g. { 'contains_url': true }
  */
 export class FilterComponent {
-    constructor(private filterJson: IFilterComponent, public readonly userId?: string) {}
+    public constructor(
+        private filterJson: IFilterComponent,
+        public readonly userId?: string | undefined | null,
+    ) {}
 
     /**
      * Checks with the filter component matches the given event
-     * @param {MatrixEvent} event event to be checked against the filter
-     * @return {boolean} true if the event matches the filter
+     * @param event - event to be checked against the filter
+     * @returns true if the event matches the filter
      */
     public check(event: MatrixEvent): boolean {
         const bundledRelationships = event.getUnsigned()?.["m.relations"] || {};
@@ -79,10 +78,11 @@ export class FilterComponent {
         // as sending a whole list of participants could be proven problematic in terms
         // of performance
         // This should be improved when bundled relationships solve that problem
-        const relationSenders = [];
-        if (this.userId && relations?.[RelationType.Thread]?.current_user_participated) {
+        const relationSenders: string[] = [];
+        if (this.userId && bundledRelationships?.[THREAD_RELATION_TYPE.name]?.current_user_participated) {
             relationSenders.push(this.userId);
         }
+
         return this.checkFields(
             event.getRoomId(),
             event.getSender(),
@@ -97,59 +97,61 @@ export class FilterComponent {
      * Converts the filter component into the form expected over the wire
      */
     public toJSON(): object {
-        return {
-            types: this.filterJson.types || null,
-            not_types: this.filterJson.not_types || [],
-            rooms: this.filterJson.rooms || null,
-            not_rooms: this.filterJson.not_rooms || [],
-            senders: this.filterJson.senders || null,
-            not_senders: this.filterJson.not_senders || [],
-            contains_url: this.filterJson.contains_url || null,
-            [UNSTABLE_FILTER_RELATION_SENDERS.name]: UNSTABLE_FILTER_RELATION_SENDERS.findIn(this.filterJson),
-            [UNSTABLE_FILTER_RELATION_TYPES.name]: UNSTABLE_FILTER_RELATION_TYPES.findIn(this.filterJson),
-        };
+        return Object.fromEntries(
+            Object.entries({
+                types: this.filterJson.types,
+                not_types: this.filterJson.not_types,
+                rooms: this.filterJson.rooms,
+                not_rooms: this.filterJson.not_rooms,
+                senders: this.filterJson.senders,
+                not_senders: this.filterJson.not_senders,
+                contains_url: this.filterJson.contains_url,
+                [FILTER_RELATED_BY_SENDERS.name]: this.filterJson[FILTER_RELATED_BY_SENDERS.name],
+                [FILTER_RELATED_BY_REL_TYPES.name]: this.filterJson[FILTER_RELATED_BY_REL_TYPES.name],
+            }).filter(([_key, value]) => value),
+        );
     }
 
     /**
      * Checks whether the filter component matches the given event fields.
-     * @param {String} roomId        the roomId for the event being checked
-     * @param {String} sender        the sender of the event being checked
-     * @param {String} eventType     the type of the event being checked
-     * @param {boolean} containsUrl  whether the event contains a content.url field
-     * @param {boolean} relationTypes  whether has aggregated relation of the given type
-     * @param {boolean} relationSenders whether one of the relation is sent by the user listed
-     * @return {boolean} true if the event fields match the filter
+     * @param roomId -        the roomId for the event being checked
+     * @param sender -        the sender of the event being checked
+     * @param eventType -     the type of the event being checked
+     * @param containsUrl -  whether the event contains a content.url field
+     * @param relationTypes -  whether has aggregated relation of the given type
+     * @param relationSenders - whether one of the relation is sent by the user listed
+     * @returns true if the event fields match the filter
      */
     private checkFields(
-        roomId: string,
-        sender: string,
+        roomId: string | undefined,
+        sender: string | undefined,
         eventType: string,
         containsUrl: boolean,
         relationTypes: Array<RelationType | string>,
         relationSenders: string[],
     ): boolean {
         const literalKeys = {
-            "rooms": function(v: string): boolean {
+            rooms: function (v: string): boolean {
                 return roomId === v;
             },
-            "senders": function(v: string): boolean {
+            senders: function (v: string): boolean {
                 return sender === v;
             },
-            "types": function(v: string): boolean {
+            types: function (v: string): boolean {
                 return matchesWildcard(eventType, v);
             },
-        };
+        } as const;
 
-        for (let n = 0; n < Object.keys(literalKeys).length; n++) {
-            const name = Object.keys(literalKeys)[n];
-            const matchFunc = literalKeys[name];
+        // oxlint-disable-next-line guard-for-in
+        for (const name in literalKeys) {
+            const matchFunc = literalKeys[<keyof typeof literalKeys>name];
             const notName = "not_" + name;
-            const disallowedValues: string[] = this.filterJson[notName];
+            const disallowedValues = this.filterJson[<`not_${keyof typeof literalKeys}`>notName];
             if (disallowedValues?.some(matchFunc)) {
                 return false;
             }
 
-            const allowedValues: string[] = this.filterJson[name];
+            const allowedValues = this.filterJson[name as keyof typeof literalKeys];
             if (allowedValues && !allowedValues.some(matchFunc)) {
                 return false;
             }
@@ -160,14 +162,14 @@ export class FilterComponent {
             return false;
         }
 
-        const relationTypesFilter = this.filterJson[UNSTABLE_FILTER_RELATION_TYPES.name];
+        const relationTypesFilter = this.filterJson[FILTER_RELATED_BY_REL_TYPES.name];
         if (relationTypesFilter !== undefined) {
             if (!this.arrayMatchesFilter(relationTypesFilter, relationTypes)) {
                 return false;
             }
         }
 
-        const relationSendersFilter = this.filterJson[UNSTABLE_FILTER_RELATION_SENDERS.name];
+        const relationSendersFilter = this.filterJson[FILTER_RELATED_BY_SENDERS.name];
         if (relationSendersFilter !== undefined) {
             if (!this.arrayMatchesFilter(relationSendersFilter, relationSenders)) {
                 return false;
@@ -178,24 +180,28 @@ export class FilterComponent {
     }
 
     private arrayMatchesFilter(filter: any[], values: any[]): boolean {
-        return values.length > 0 && values.every(value => {
-            return filter.includes(value);
-        });
+        return (
+            values.length > 0 &&
+            filter.every((value) => {
+                return values.includes(value);
+            })
+        );
     }
 
     /**
      * Filters a list of events down to those which match this filter component
-     * @param {MatrixEvent[]} events  Events to be checked against the filter component
-     * @return {MatrixEvent[]} events which matched the filter component
+     * @param events -  Events to be checked against the filter component
+     * @returns events which matched the filter component
      */
     public filter(events: MatrixEvent[]): MatrixEvent[] {
+        // oxlint-disable-next-line typescript/unbound-method
         return events.filter(this.check, this);
     }
 
     /**
      * Returns the limit field for a given filter component, providing a default of
      * 10 if none is otherwise specified. Cargo-culted from Synapse.
-     * @return {Number} the limit for this filter component.
+     * @returns the limit for this filter component.
      */
     public limit(): number {
         return this.filterJson.limit !== undefined ? this.filterJson.limit : 10;

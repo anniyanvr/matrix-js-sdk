@@ -14,24 +14,17 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import { Callback } from "../client";
-import { IContent, IEvent } from "../models/event";
-import { Preset, Visibility } from "./partials";
-import { SearchKey } from "./search";
-import { IRoomEventFilter } from "../filter";
-import { Direction } from "../models/event-timeline";
-
-// allow camelcase as these are things that go onto the wire
-/* eslint-disable camelcase */
+import { type IContent, type IEvent } from "../models/event.ts";
+import { type Preset, type Visibility } from "./partials.ts";
+import { type IEventWithRoomId, type SearchKey } from "./search.ts";
+import { type IRoomEventFilter } from "../filter.ts";
+import { type Direction } from "../models/event-timeline.ts";
+import { type PushRuleAction } from "./PushRules.ts";
+import { type MatrixError } from "../matrix.ts";
+import { type IRoomEvent } from "../sync-accumulator.ts";
+import { type EventType, type RelationType, type RoomType } from "./event.ts";
 
 export interface IJoinRoomOpts {
-    /**
-     * True to do a room initial sync on the resulting
-     * room. If false, the <strong>returned Room object will have no current state.
-     * </strong> Default: true.
-     */
-    syncRoom?: boolean;
-
     /**
      * If the caller has a keypair 3pid invite, the signing URL is passed in this parameter.
      */
@@ -39,30 +32,154 @@ export interface IJoinRoomOpts {
 
     /**
      * The server names to try and join through in addition to those that are automatically chosen.
+     * Only the first 3 are actually used in the request, to avoid HTTP 414 Request-URI Too Long responses.
      */
     viaServers?: string[];
+
+    /**
+     * Previously, configured whether to accept encrypted history shared by the inviter. This is now always enabled,
+     * and the setting is only retained to avoid a breaking change to the API. It has no effect.
+     *
+     * @deprecated
+     */
+    acceptSharedHistory?: boolean;
+}
+
+/** Options object for {@link MatrixClient.invite}. */
+export interface InviteOpts {
+    /**
+     * The reason for the invite.
+     */
+    reason?: string;
+
+    /**
+     * Previously, configured whether to send encrypted history if the visibility settings allow it.
+     * This is now always enabled, and the setting is only retained to avoid a breaking change to the API. It has no effect.
+     *
+     * @deprecated
+     */
+    shareEncryptedHistory?: boolean;
+}
+
+export interface KnockRoomOpts {
+    /**
+     * The reason for the knock.
+     */
+    reason?: string;
+
+    /**
+     * The server names to try and knock through in addition to those that are automatically chosen.
+     * Only the first 3 are actually used in the request, to avoid HTTP 414 Request-URI Too Long responses.
+     */
+    viaServers?: string | string[];
 }
 
 export interface IRedactOpts {
     reason?: string;
+    /**
+     * If specified, then any events which relate to the event being redacted with
+     * any of the relationship types listed will also be redacted.
+     * Provide a "*" list item to tell the server to redact relations of any type.
+     *
+     * <b>Raises an Error if the server does not support it.</b>
+     * Check for server-side support before using this param with
+     * <code>client.canSupport.get(Feature.RelationBasedRedactions)</code>.
+     * {@link https://github.com/matrix-org/matrix-spec-proposals/pull/3912}
+     */
+    with_rel_types?: Array<RelationType | "*">;
 }
 
 export interface ISendEventResponse {
     event_id: string;
 }
 
+/** @deprecated Scheduling a delayed event with a `parent_delay_id` is no longer supported */
+export type SendDelayedEventRequestOpts = { parent_delay_id: string } | { delay: number; parent_delay_id?: string };
+
+/** @deprecated Scheduling a delayed event with a `parent_delay_id` is no longer supported */
+export function isSendDelayedEventRequestOpts(opts: object): opts is SendDelayedEventRequestOpts {
+    if ("parent_delay_id" in opts && typeof opts.parent_delay_id !== "string") {
+        // Invalid type, reject
+        return false;
+    }
+    if ("delay" in opts && typeof opts.delay !== "number") {
+        // Invalid type, reject.
+        return false;
+    }
+    // At least one of these fields must be specified.
+    return "delay" in opts || "parent_delay_id" in opts;
+}
+export type SendDelayedEventResponse = {
+    delay_id: string;
+};
+
+export enum UpdateDelayedEventAction {
+    Cancel = "cancel",
+    Restart = "restart",
+    Send = "send",
+}
+
+export type UpdateDelayedEventRequestOpts = SendDelayedEventResponse & {
+    action: UpdateDelayedEventAction;
+};
+
+type DelayedPartialTimelineEvent = {
+    room_id: string;
+    type: string;
+    content: IContent;
+};
+
+type DelayedPartialStateEvent = DelayedPartialTimelineEvent & {
+    state_key: string;
+};
+
+type DelayedPartialEvent = DelayedPartialTimelineEvent | DelayedPartialStateEvent;
+
+export type DelayedEventInfoItem = DelayedPartialEvent &
+    SendDelayedEventResponse &
+    SendDelayedEventRequestOpts & {
+        running_since: number;
+    };
+
+export type DelayedEventInfo = {
+    scheduled?: DelayedEventInfoItem[];
+    finalised?: {
+        delayed_event: DelayedEventInfoItem;
+        outcome: "send" | "cancel";
+        reason: "error" | "action" | "delay";
+        error?: MatrixError["data"];
+        event_id?: string;
+        origin_server_ts?: number;
+    }[];
+    next_batch?: string;
+};
+
 export interface IPresenceOpts {
+    // One of "online", "offline" or "unavailable"
     presence: "online" | "offline" | "unavailable";
+    // The status message to attach.
     status_msg?: string;
 }
 
 export interface IPaginateOpts {
+    // true to fill backwards, false to go forwards
     backwards?: boolean;
+    // number of events to request
     limit?: number;
 }
 
 export interface IGuestAccessOpts {
+    /**
+     * True to allow guests to join this room. This
+     * implicitly gives guests write access. If false or not given, guests are
+     * explicitly forbidden from joining the room.
+     */
     allowJoin: boolean;
+    /**
+     * True to set history visibility to
+     * be world_readable. This gives guests read access *from this point forward*.
+     * If false or not given, history visibility is not modified.
+     */
     allowRead: boolean;
 }
 
@@ -72,7 +189,9 @@ export interface ISearchOpts {
 }
 
 export interface IEventSearchOpts {
+    // a JSON filter object to pass in the request
     filter?: IRoomEventFilter;
+    // the term to search for
     term: string;
 }
 
@@ -90,14 +209,30 @@ export interface ICreateRoomStateEvent {
 }
 
 export interface ICreateRoomOpts {
+    // The alias localpart to assign to this room.
     room_alias_name?: string;
+    // Either 'public' or 'private'.
     visibility?: Visibility;
+    // The name to give this room.
     name?: string;
+    // The topic to give this room.
     topic?: string;
     preset?: Preset;
-    power_level_content_override?: object;
+    power_level_content_override?: {
+        ban?: number;
+        events?: Record<EventType | string, number>;
+        events_default?: number;
+        invite?: number;
+        kick?: number;
+        notifications?: Record<string, number>;
+        redact?: number;
+        state_default?: number;
+        users?: Record<string, number>;
+        users_default?: number;
+    };
     creation_content?: object;
     initial_state?: ICreateRoomStateEvent[];
+    // A list of user IDs to invite to this room.
     invite?: string[];
     invite_3pid?: IInvite3PID[];
     is_direct?: boolean;
@@ -105,24 +240,28 @@ export interface ICreateRoomOpts {
 }
 
 export interface IRoomDirectoryOptions {
+    /**
+     * The remote server to query for the room list.
+     * Optional. If unspecified, get the local homeserver's public room list.
+     */
     server?: string;
+    /**
+     * Maximum number of entries to return
+     */
     limit?: number;
+    /**
+     * Token to paginate from
+     */
     since?: string;
+
+    /** Filter parameters */
     filter?: {
-        generic_search_term: string;
+        // String to search for
+        generic_search_term?: string;
+        room_types?: Array<RoomType | null>;
     };
     include_all_networks?: boolean;
     third_party_instance_id?: string;
-}
-
-export interface IUploadOpts {
-    name?: string;
-    includeFilename?: boolean;
-    type?: string;
-    rawResponse?: boolean;
-    onlyContentUri?: boolean;
-    callback?: Callback;
-    progressHandler?: (state: {loaded: number, total: number}) => void;
 }
 
 export interface IAddThreePidOnlyBody {
@@ -137,7 +276,8 @@ export interface IAddThreePidOnlyBody {
 export interface IBindThreePidBody {
     client_secret: string;
     id_server: string;
-    id_access_token: string;
+    // Some older identity servers have no auth enabled
+    id_access_token: string | null;
     sid: string;
 }
 
@@ -145,14 +285,58 @@ export interface IRelationsRequestOpts {
     from?: string;
     to?: string;
     limit?: number;
-    direction?: Direction;
+    dir?: Direction;
+    recurse?: boolean; // MSC3981 Relations Recursion https://github.com/matrix-org/matrix-spec-proposals/pull/3981
 }
 
 export interface IRelationsResponse {
-    original_event: IEvent;
     chunk: IEvent[];
     next_batch?: string;
     prev_batch?: string;
 }
 
-/* eslint-enable camelcase */
+export interface IContextResponse {
+    end?: string;
+    start?: string;
+    state?: IEventWithRoomId[];
+    events_before?: IEventWithRoomId[];
+    events_after?: IEventWithRoomId[];
+    event?: IEventWithRoomId;
+}
+
+export interface IEventsResponse {
+    chunk: IEventWithRoomId[];
+    end: string;
+    start: string;
+}
+
+export interface INotification {
+    actions: PushRuleAction[];
+    event: IRoomEvent;
+    profile_tag?: string;
+    read: boolean;
+    room_id: string;
+    ts: number;
+}
+
+export interface INotificationsResponse {
+    next_token: string;
+    notifications: INotification[];
+}
+
+export interface IFilterResponse {
+    filter_id: string;
+}
+
+export interface ITagsResponse {
+    tags: {
+        [tagId: string]: {
+            order: number;
+        };
+    };
+}
+
+export interface IStatusResponse extends IPresenceOpts {
+    currently_active?: boolean;
+    last_active_ago?: number;
+}

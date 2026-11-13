@@ -1,0 +1,188 @@
+name: Static Analysis
+on:
+    pull_request: {}
+    merge_group:
+        types: [checks_requested]
+    push:
+        branches: [develop, master]
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+permissions: {} # No permissions needed
+jobs:
+    ts_lint:
+        name: "Typescript Syntax Check"
+        runs-on: ubuntu-26.04
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+              with:
+                  persist-credentials: false
+
+            - name: 🔨 Setup pnpm & node
+              uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
+              with:
+                  runtime: node
+                  cache: true
+                  install: true
+
+            - name: Typecheck
+              run: "pnpm run lint:types"
+
+    js_lint:
+        name: "Oxc"
+        runs-on: ubuntu-26.04
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+              with:
+                  persist-credentials: false
+
+            - name: 🔨 Setup pnpm & node
+              uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
+              with:
+                  runtime: node
+                  cache: true
+                  install: true
+
+            - name: Run Linter
+              run: "pnpm run lint:js"
+
+    node_example_lint:
+        name: "Node.js example"
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+              with:
+                  persist-credentials: false
+
+            - name: 🔨 Setup pnpm & node
+              uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
+              with:
+                  runtime: node
+                  cache: true
+                  install: true
+
+            - name: Build Types
+              run: "pnpm build:types"
+
+            - name: Install Example Deps
+              run: "npm install"
+              working-directory: "examples/node"
+
+            - name: Check Syntax
+              run: "node --check app.js"
+              working-directory: "examples/node"
+
+            - name: Typecheck
+              run: "npx tsc"
+              working-directory: "examples/node"
+
+    workflow_lint:
+        name: "Workflow Lint"
+        runs-on: ubuntu-26.04
+        permissions:
+            security-events: write
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+              with:
+                  persist-credentials: false
+
+            - name: 🔨 Setup pnpm & node
+              uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
+              with:
+                  runtime: node
+                  cache: true
+                  install: true
+
+            - name: Run Linter
+              run: "pnpm lint:workflows"
+
+            - name: Run zizmor
+              uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
+
+    docs:
+        name: "JSDoc Checker"
+        runs-on: ubuntu-26.04
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+              with:
+                  persist-credentials: false
+
+            - name: 🔨 Setup pnpm & node
+              uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
+              with:
+                  runtime: node
+                  cache: true
+                  install: true
+
+            - name: Generate Docs
+              run: "pnpm run gendoc --treatWarningsAsErrors --suppressCommentWarningsInDeclarationFiles"
+
+            - name: Upload Artifact
+              uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+              with:
+                  name: docs
+                  path: _docs
+                  # We'll only use this in a workflow_run, then we're done with it
+                  retention-days: 1
+
+    analyse_dead_code:
+        name: "Analyse Dead Code"
+        runs-on: ubuntu-26.04
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+              with:
+                  persist-credentials: false
+
+            - name: 🔨 Setup pnpm & node
+              uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
+              with:
+                  runtime: node
+                  cache: true
+                  install: true
+
+            - name: Run linter
+              run: "pnpm run lint:knip"
+
+    element-web:
+        name: Downstream tsc element-web
+        if: github.event_name == 'merge_group'
+        runs-on: ubuntu-26.04
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+              with:
+                  repository: element-hq/element-web
+                  persist-credentials: false
+
+            - name: 🔨 Setup pnpm & node
+              uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
+              with:
+                  runtime: node
+                  cache: true
+                  install: false
+
+            - name: Install Dependencies
+              run: "./scripts/layered.sh"
+              env:
+                  # tell layered.sh to check out the right sha of the JS-SDK
+                  JS_SDK_GITHUB_BASE_REF: ${{ github.sha }}
+
+            - name: Typecheck
+              working-directory: apps/web
+              run: "pnpm run lint:types"
+
+    # Workflow consolidation job
+    done:
+        needs:
+            - ts_lint
+            - js_lint
+            - node_example_lint
+            - workflow_lint
+            - docs
+            - analyse_dead_code
+            - element-web
+        name: Static Analysis
+        runs-on: ubuntu-26.04
+        if: always()
+        steps:
+            - if: contains(needs.*.result , 'failure') || contains(needs.*.result, 'cancelled')
+              run: exit 1
